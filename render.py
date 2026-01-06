@@ -1,153 +1,81 @@
-# -----------------------------------------------------------------------------
-# Copyright (c) 2009-2016 Nicolas P. Rougier. All rights reserved.
-# Distributed under the (new) BSD License.
-# -----------------------------------------------------------------------------
+import pyglet
+from pyglet.graphics.shader import Shader, ShaderProgram
+from pyglet.math import Mat4, Vec3
+
+from load_off import OffModel
 import numpy as np
-from glumpy import app, gl, glm, gloo, data
 
-def cube():
-    vtype = [('a_position', np.float32, 3),
-             ('a_texcoord', np.float32, 2),
-             ('a_normal',   np.float32, 3)]
-    itype = np.uint32
+shape = OffModel("off/1.off", 0)
 
-    # Vertices positions
-    p = np.array([[1, 1, 1], [-1, 1, 1], [-1, -1, 1], [1, -1, 1],
-                  [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, -1]], dtype=float)
-    # Face Normals
-    n = np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0],
-                  [-1, 0, 1], [0, -1, 0], [0, 0, -1]])
-    # Texture coords
-    t = np.array([[0, 0], [0, 1], [1, 1], [1, 0]])
+window = pyglet.window.Window(width=1024, height=768, resizable=True)
 
-    faces_p = [0, 1, 2, 3,  0, 3, 4, 5,   0, 5, 6, 1,
-               1, 6, 7, 2,  7, 4, 3, 2,   4, 7, 6, 5]
-    faces_n = [0, 0, 0, 0,  1, 1, 1, 1,   2, 2, 2, 2,
-               3, 3, 3, 3,  4, 4, 4, 4,   5, 5, 5, 5]
-    faces_t = [0, 1, 2, 3,  0, 1, 2, 3,   0, 1, 2, 3,
-               3, 2, 1, 0,  0, 1, 2, 3,   0, 1, 2, 3]
+with open("shaders/vertex.glsl", "r") as f:
+    vert_src = f.read()
+with open("shaders/frag-red.glsl", "r") as f:
+    frag_src = f.read()
 
-    vertices = np.zeros(24, vtype)
-    vertices['a_position'] = p[faces_p]
-    vertices['a_normal']   = n[faces_n]
-    vertices['a_texcoord'] = t[faces_t]
+vert_shader = Shader(vert_src, 'vertex')
+frag_shader = Shader(frag_src, 'fragment')
+program = ShaderProgram(vert_shader, frag_shader)
 
-    filled = np.resize(
-       np.array([0, 1, 2, 0, 2, 3], dtype=itype), 6 * (2 * 3))
-    filled += np.repeat(4 * np.arange(6, dtype=itype), 6)
+batch = pyglet.graphics.Batch()
+verts_np = np.array(shape.vertices, dtype=np.float32)
+verts_padded = np.insert(verts_np, 3, 1.0, axis=1) # add homogeneous
 
-    outline = np.resize(
-        np.array([0, 1, 1, 2, 2, 3, 3, 0], dtype=itype), 6 * (2 * 4))
-    outline += np.repeat(4 * np.arange(6, dtype=itype), 8)
-    vertices = vertices.view(gloo.VertexBuffer)
-    filled   = filled.view(gloo.IndexBuffer)
-
-    return vertices, filled
+vertex_list = program.vertex_list_indexed(
+    len(shape.vertices), 
+    pyglet.gl.GL_TRIANGLES,
+    indices=np.array(shape.faces).flatten(),
+    batch=batch,
+    vertexPosition=('f', verts_padded.flatten()),
+    vertexColor=('f', np.array(shape.features).flatten())
+)
 
 
-vertex = """
-uniform mat4   u_model;         // Model matrix
-uniform mat4   u_view;          // View matrix
-uniform mat4   u_projection;    // Projection matrix
-attribute vec3 a_position;      // Vertex position
-attribute vec3 a_normal;        // Vertex normal
-attribute vec2 a_texcoord;      // Vertex texture coordinates
-varying vec3   v_normal;        // Interpolated normal (out)
-varying vec3   v_position;      // Interpolated position (out)
-varying vec2   v_texcoord;      // Interpolated fragment texture coordinates (out)
+verts = np.array(shape.vertices)
+v_min = verts.min(axis=0)
+v_max = verts.max(axis=0)
 
-void main()
-{
-    // Assign varying variables
-    v_normal   = a_normal;
-    v_position = a_position;
-    v_texcoord = a_texcoord;
+# v_max = np.array([float('-inf'), float('-inf'), float('-inf')])
+# v_min = np.array([float('inf'), float('inf'), float('inf')])
+# for vert in verts:
+#     for idx in range(0,3):
+#         if vert[idx] < v_min[idx]:
+#             v_min[idx] = vert[idx]
+            
+#         if vert[idx] > v_max[idx]:
+#             v_max[idx] = vert[idx]
+# print("v_min is ", v_min)
+# print("v_max is ", v_max)
 
-    // Final position
-    gl_Position = u_projection * u_view * u_model * vec4(a_position,1.0);
-}
-"""
+center = (v_min + v_max) / 2.0
+diag = np.linalg.norm(v_max - v_min)
 
-fragment = """
-uniform mat4      u_model;           // Model matrix
-uniform mat4      u_view;            // View matrix
-uniform mat4      u_normal;          // Normal matrix
-uniform mat4      u_projection;      // Projection matrix
-uniform sampler2D u_texture;         // Texture 
-uniform vec3      u_light_position;  // Light position
-uniform vec3      u_light_intensity; // Light intensity
+model = Mat4(1.0)
+model = model.scale(Vec3(2.0 / diag, 2.0 / diag, 2.0 / diag))
+model = model.translate(Vec3(-center[0], -center[1], -center[2]))
 
-varying vec3      v_normal;          // Interpolated normal (in)
-varying vec3      v_position;        // Interpolated position (in)
-varying vec2      v_texcoord;        // Interpolated fragment texture coordinates (in)
-void main()
-{
-    // Calculate normal in world coordinates
-    vec3 normal = normalize(u_normal * vec4(v_normal,1.0)).xyz;
+# Equivalent to glm::lookAt(camera_pos, target, up)
+camera_pos = Vec3(0, 0, 2) # Example position
+target = Vec3(0, 0, 0)
+up_vector = Vec3(0, 1, 0)
+view = Mat4.look_at(camera_pos, target, up_vector)
 
-    // Calculate the location of this fragment (pixel) in world coordinates
-    vec3 position = vec3(u_view*u_model * vec4(v_position, 1));
+import math
+# fov = math.radians(60)
+projection = Mat4.perspective_projection(
+    window.aspect_ratio,
+    z_near=0.1,
+    z_far=5.0,
+    fov=60
+)
 
-    // Calculate the vector from this pixels surface to the light source
-    vec3 surfaceToLight = u_light_position - position;
-
-    // Calculate the cosine of the angle of incidence (brightness)
-    float brightness = dot(normal, surfaceToLight) /
-                      (length(surfaceToLight) * length(normal));
-    brightness = max(min(brightness,1.0),0.0);
-
-    // Calculate final color of the pixel, based on:
-    // 1. The angle of incidence: brightness
-    // 2. The color/intensities of the light: light.intensities
-    // 3. The texture and texture coord: texture(tex, fragTexCoord)
-
-    // Get texture color
-    vec4 t_color = vec4(texture2D(u_texture, v_texcoord).rgb, 1.0);
-
-    // Final color
-    gl_FragColor = t_color * (0.1 + 0.9*brightness * vec4(u_light_intensity, 1));
-}
-"""
-
-window = app.Window(width=1024, height=1024,
-                    color=(0.30, 0.30, 0.35, 1.00))
+mvp = projection @ view @ model
+program['mvp'] = mvp
 
 @window.event
-def on_draw(dt):
-    global phi, theta, duration
-
+def on_draw():
     window.clear()
-    gl.glEnable(gl.GL_DEPTH_TEST)
-    cube.draw(gl.GL_TRIANGLES, indices)
+    batch.draw()
 
-    # Rotate cube
-    theta += 0.5 # degrees
-    phi += 0.5 # degrees
-    view = cube['u_view'].reshape(4,4)
-    model = np.eye(4, dtype=np.float32)
-    glm.rotate(model, theta, 0, 0, 1)
-    glm.rotate(model, phi, 0, 1, 0)
-    cube['u_model'] = model
-    cube['u_normal'] = np.array(np.matrix(np.dot(view, model)).I.T)
-
-@window.event
-def on_resize(width, height):
-    cube['u_projection'] = glm.perspective(45.0, width / float(height), 2.0, 100.0)
-
-@window.event
-def on_init():
-    gl.glEnable(gl.GL_DEPTH_TEST)
-    gl.glDisable(gl.GL_BLEND)
-    
-vertices, indices = cube()
-cube = gloo.Program(vertex, fragment)
-cube.bind(vertices)
-
-cube["u_light_position"] = np.array([-2,-2,2])
-cube["u_light_intensity"] = np.array([1,1,1])
-cube['u_texture'] = data.get("crate.png")
-cube['u_model'] = np.eye(4, dtype=np.float32)
-cube['u_view'] = glm.translation(0, 0, -5)
-phi, theta = 40, 30
-
-app.run()
+pyglet.app.run()
