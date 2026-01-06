@@ -1,9 +1,12 @@
 import pyglet
+import numpy as np
 from pyglet.graphics.shader import Shader, ShaderProgram
 from pyglet.math import Mat4, Vec3
-
 from load_off import OffModel
-import numpy as np
+
+from pyglet.window import mouse
+
+
 
 shape = OffModel("off/1.off", 0)
 
@@ -31,51 +34,65 @@ vertex_list = program.vertex_list_indexed(
     vertexColor=('f', np.array(shape.features).flatten())
 )
 
+camera_pos = Vec3(0,0,2)
+def compute_mvp():
+    global camera_pos
+    # if camera_pos is None:
+    #     camera_pos = Vec3(0, 0, 2) 
+        
+    verts = np.array(shape.vertices)
+    v_min = verts.min(axis=0)
+    v_max = verts.max(axis=0)
+    center = (v_min + v_max) / 2.0
+    diag = np.linalg.norm(v_max - v_min)
 
-verts = np.array(shape.vertices)
-v_min = verts.min(axis=0)
-v_max = verts.max(axis=0)
+    model = Mat4(1.0)
+    model = model.scale(Vec3(2.0 / diag, 2.0 / diag, 2.0 / diag))
+    model = model.translate(Vec3(-center[0], -center[1], -center[2]))
 
-# v_max = np.array([float('-inf'), float('-inf'), float('-inf')])
-# v_min = np.array([float('inf'), float('inf'), float('inf')])
-# for vert in verts:
-#     for idx in range(0,3):
-#         if vert[idx] < v_min[idx]:
-#             v_min[idx] = vert[idx]
-            
-#         if vert[idx] > v_max[idx]:
-#             v_max[idx] = vert[idx]
-# print("v_min is ", v_min)
-# print("v_max is ", v_max)
+    target = Vec3(0, 0, 0)
+    up_vector = Vec3(0, 1, 0)
+    view = Mat4.look_at(camera_pos, target, up_vector)
 
-center = (v_min + v_max) / 2.0
-diag = np.linalg.norm(v_max - v_min)
+    projection = Mat4.perspective_projection(
+        window.aspect_ratio,
+        z_near=0.1,
+        z_far=5.0,
+        fov=60 # degrees
+    )
 
-model = Mat4(1.0)
-model = model.scale(Vec3(2.0 / diag, 2.0 / diag, 2.0 / diag))
-model = model.translate(Vec3(-center[0], -center[1], -center[2]))
+    mvp = projection @ view @ model
+    program['mvp'] = mvp
 
-# Equivalent to glm::lookAt(camera_pos, target, up)
-camera_pos = Vec3(0, 0, 2) # Example position
-target = Vec3(0, 0, 0)
-up_vector = Vec3(0, 1, 0)
-view = Mat4.look_at(camera_pos, target, up_vector)
-
-import math
-# fov = math.radians(60)
-projection = Mat4.perspective_projection(
-    window.aspect_ratio,
-    z_near=0.1,
-    z_far=5.0,
-    fov=60
-)
-
-mvp = projection @ view @ model
-program['mvp'] = mvp
 
 @window.event
 def on_draw():
     window.clear()
     batch.draw()
 
+
+
+@window.event
+def on_mouse_drag(x, y, dx, dy, buttons, modifiers):
+    global camera_pos
+    aim = Vec3(0,0,0)
+    forward = Vec3.normalize(aim - camera_pos);
+    right = Vec3.normalize(Vec3.cross(forward, Vec3(0, 1, 0)));
+    up = Vec3.normalize(Vec3.cross(forward, Vec3(1, 0, 0)));
+    sensitivity = 0.01
+    max_distance_to_object = 2.0
+
+    if buttons & mouse.LEFT:
+        # print(x,y,dx,dy)
+        camera_pos -= dx * right * sensitivity;
+        camera_pos += dy * up * sensitivity;
+        
+        # // clamp with radius=max_distance
+        if camera_pos.length() > max_distance_to_object:
+            camera_pos = camera_pos.normalize() * max_distance_to_object;
+        
+        
+        compute_mvp()
+
+compute_mvp()
 pyglet.app.run()
