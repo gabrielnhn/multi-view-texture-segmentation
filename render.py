@@ -68,14 +68,37 @@ def compute_mvp():
         fov=60 # degrees
     )
 
-    mvp = projection @ view @ model
-    program['mvp'] = mvp
+    mv = view @ model
+    # mvp = projection @ view @ model
+    program['p'] = projection
+    program['mv'] = mv
 
 
 @window.event
 def on_draw():
     window.clear()
+    pyglet.gl.glClearColor(0.5, 0.5, 1.0, 1.0)
     batch.draw()
+
+@window.event
+def on_mouse_scroll(x, y, scroll_x, scroll_y):
+    print("SCROLL", x, y, scroll_x, scroll_y)
+    global camera_pos
+    aim = Vec3(0,0,0)
+    forward = Vec3.normalize(aim - camera_pos);
+    right = Vec3.normalize(Vec3.cross(forward, Vec3(0, 1, 0)));
+    up = Vec3.normalize(Vec3.cross(forward, Vec3(1, 0, 0)));
+    sensitivity = 0.1
+    max_distance_to_object = 2.0
+
+    # print(x,y,dx,dy)
+    camera_pos += forward * scroll_y * sensitivity;
+    
+    # // clamp with radius=max_distance
+    if camera_pos.length() > max_distance_to_object:
+        camera_pos = camera_pos.normalize() * max_distance_to_object;
+    
+    compute_mvp()
 
 
 @window.event

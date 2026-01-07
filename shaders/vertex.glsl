@@ -1,9 +1,14 @@
 #version 330 core
 layout (location = 0) in vec3 vertexPosition;
-uniform mat4 mvp;
+uniform mat4 mv;
+uniform mat4 p;
 out vec3 vPos; 
 
 void main() {
-    gl_Position = mvp * vec4(vertexPosition, 1.0);
-    vPos = vec3(gl_Position); 
+
+    vec4 mv_result = mv * vec4(vertexPosition, 1.0);
+    gl_Position = p * mv_result;
+
+    // to match midas prediction for controlnet
+    vPos = vec3(mv_result); 
 }
