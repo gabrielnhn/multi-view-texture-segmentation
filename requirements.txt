@@ -1,3 +1,7 @@
-glfw
-pyopengl
-glumpy
+pyglet
+
+
+diffusers
+transformers
+accelerate
+# python-opencv

@@ -1,5 +1,4 @@
 # https://huggingface.co/lllyasviel/sd-controlnet-normal
-# pip install diffusers transformers accelerate
 from PIL import Image
 from transformers import pipeline
 import numpy as np
@@ -9,16 +8,24 @@ import torch
 from diffusers.utils import load_image
 
 image = load_image("https://huggingface.co/lllyasviel/sd-controlnet-normal/resolve/main/images/toy.png").convert("RGB")
+Image._show(image)
 
 depth_estimator = pipeline("depth-estimation", model ="Intel/dpt-hybrid-midas" )
 
-image = depth_estimator(image)['predicted_depth'][0]
+image = depth_estimator(image)['predicted_depth']
+# print(images.shape)
+
 
 image = image.numpy()
+
+
 
 image_depth = image.copy()
 image_depth -= np.min(image_depth)
 image_depth /= np.max(image_depth)
+
+# cv2.imshow("BRUH", image_depth)
+
 
 bg_threhold = 0.4
 
@@ -35,6 +42,9 @@ image /= np.sum(image ** 2.0, axis=2, keepdims=True) ** 0.5
 image = (image * 127.5 + 127.5).clip(0, 255).astype(np.uint8)
 image = Image.fromarray(image)
 
+Image._show(image)
+
+
 controlnet = ControlNetModel.from_pretrained(
     "fusing/stable-diffusion-v1-5-controlnet-normal", torch_dtype=torch.float16
 )
@@ -48,9 +58,9 @@ pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 # Remove if you do not have xformers installed
 # see https://huggingface.co/docs/diffusers/v0.13.0/en/optimization/xformers#installing-xformers
 # for installation instructions
-pipe.enable_xformers_memory_efficient_attention()
+# pipe.enable_xformers_memory_efficient_attention()
 
-pipe.enable_model_cpu_offload()
+# pipe.enable_model_cpu_offload()
 
 image = pipe("cute toy", image, num_inference_steps=20).images[0]
 
