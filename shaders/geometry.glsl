@@ -15,10 +15,8 @@ void main() {
 
     vec3 viewDirection = vPos[0] - cameraPos;
 
-    // if (dot(normal, viewDirection) <= 0)
-    //     normal = - normal;
-
-
+    if (dot(normal, viewDirection) <= 0)
+        normal = - normal;
 
     for(int i = 0; i < 3; i++) {
         gl_Position = gl_in[i].gl_Position;

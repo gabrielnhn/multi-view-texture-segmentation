@@ -3,47 +3,45 @@ import numpy as np
 from pyglet.graphics.shader import Shader, ShaderProgram
 from pyglet.math import Mat4, Vec3
 from load_off import OffModel
-
 from pyglet.window import mouse
-
-shape = OffModel("off/1.off", 0)
 
 window = pyglet.window.Window(width=1024, height=768, resizable=True)
 
 with open("shaders/vertex.glsl", "r") as f:
     vert_src = f.read()
-
 with open("shaders/geometry.glsl") as f:
     geometry_src = f.read()
-    
-# with open("shaders/frag-red.glsl", "r") as f:
 with open("shaders/frag-normal.glsl", "r") as f:
     frag_src = f.read()
 
 vert_shader = Shader(vert_src, 'vertex')
 geom_shader = Shader(geometry_src, 'geometry')
 frag_shader = Shader(frag_src, 'fragment')
-# program = ShaderProgram(vert_shader, frag_shader)
 program = ShaderProgram(vert_shader, geom_shader, frag_shader)
 
-# pyglet.gl.glEnable(pyglet.gl.GL_CULL_FACE)
 pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST);
-
-
-
 batch = pyglet.graphics.Batch()
-verts_np = np.array(shape.vertices, dtype=np.float32)
-# verts_padded = np.insert(verts_np, 3, 1.0, axis=1) # add homogeneous
 
-vertex_list = program.vertex_list_indexed(
-    len(shape.vertices), 
-    pyglet.gl.GL_TRIANGLES,
-    indices=np.array(shape.faces).flatten(),
-    batch=batch,
-    # vertexPosition=('f', verts_padded.flatten()),
-    vertexPosition=('f', verts_np.flatten()),
-    # vertexColor=('f', np.array(shape.features).flatten())
-)
+
+shape = None
+vertex_list = None
+def reload_shape(shape_index):
+    global shape
+    global vertex_list
+    if shape is not None:
+        vertex_list.delete()
+    
+    path = f"off/{shape_index}.off"
+    shape = OffModel(path)
+    verts_np = np.array(shape.vertices, dtype=np.float32)
+    
+    vertex_list = program.vertex_list_indexed(
+        len(shape.vertices), 
+        pyglet.gl.GL_TRIANGLES,
+        indices=np.array(shape.faces).flatten(),
+        batch=batch,
+        vertexPosition=('f', verts_np.flatten()),
+    )
 
 camera_pos = Vec3(0,0,2)
 def compute_mvp():
@@ -80,7 +78,6 @@ def on_draw():
     batch.draw()
 
 
-
 @window.event
 def on_mouse_drag(x, y, dx, dy, buttons, modifiers):
     global camera_pos
@@ -100,8 +97,20 @@ def on_mouse_drag(x, y, dx, dy, buttons, modifiers):
         if camera_pos.length() > max_distance_to_object:
             camera_pos = camera_pos.normalize() * max_distance_to_object;
         
-        
         compute_mvp()
 
+@window.event
+def on_key_press(symbol, modifiers):
+    global shape_index
+    if symbol == pyglet.window.key.RIGHT:
+        shape_index += 1
+    if symbol == pyglet.window.key.LEFT:
+        shape_index -= 1
+        
+    shape_index = np.clip(shape_index, 1, 44)
+    reload_shape(shape_index)
+    
+shape_index = 1
+reload_shape(shape_index)
 compute_mvp()
 pyglet.app.run()

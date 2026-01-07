@@ -4,7 +4,7 @@ class OffModel:
     # https:#en.wikipedia.org/wiki/OFF_(file_format)
 
     default_feature = np.array((0.2,0.2,0.2))
-    def __init__(self, path, index):
+    def __init__(self, path):
 
         # Data member
         self.vertices = []
@@ -19,7 +19,6 @@ class OffModel:
 
             if (line.find("OFF") == -1):
                 print(f"File {path} is not an OFF model"  )
-                index = -1
                 return
 
             # second line
