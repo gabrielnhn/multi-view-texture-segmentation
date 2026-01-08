@@ -5,15 +5,21 @@ layout (triangle_strip, max_vertices = 3) out;
 in vec3 vPos[];
 out vec3 fNormal;
 
-uniform vec3 cameraPos;
+// uniform vec3 cameraPos;
 
 
 void main() {
     vec3 edge1 = vPos[1] - vPos[0];
     vec3 edge2 = vPos[2] - vPos[0];
-    vec3 normal = normalize(cross(edge1, edge2));
+    // vec3 normal = normalize(cross(edge1, edge2));
+    vec3 normal = cross(edge1, edge2);
+    // normal.x /= (2.0 * 3.14159);
+    // normal.y /= (2.0 * 3.14159);
+    normal = normalize(normal);
 
-    vec3 viewDirection = vPos[0] - cameraPos;
+
+
+    vec3 viewDirection = vPos[0];
 
     if (dot(normal, viewDirection) <= 0)
         normal = - normal;

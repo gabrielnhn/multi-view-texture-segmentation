@@ -5,6 +5,27 @@ from pyglet.math import Mat4, Vec3
 from load_off import OffModel
 from pyglet.window import mouse
 
+# Controlnet setup
+from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
+import torch
+from PIL import Image
+
+
+controlnet = ControlNetModel.from_pretrained(
+    "fusing/stable-diffusion-v1-5-controlnet-normal",
+    torch_dtype=torch.float16
+)
+pipe = StableDiffusionControlNetPipeline.from_pretrained(
+    "runwayml/stable-diffusion-v1-5",
+    controlnet=controlnet,
+    safety_checker=None,
+    torch_dtype=torch.float16
+)
+pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
+pipe.enable_model_cpu_offload()
+
+# Pyglet setup
+
 window = pyglet.window.Window(width=1024, height=768, resizable=True)
 
 with open("shaders/vertex.glsl", "r") as f:
@@ -74,6 +95,32 @@ def compute_mvp():
     program['mv'] = mv
 
 
+def controlnet_inference():
+    # https://stackoverflow.com/questions/4986662/taking-a-screenshot-with-pyglet-fixd
+    pyglet.image.get_buffer_manager().get_color_buffer().save("images/screenshot.png")
+    pyglet.image.get_buffer_manager().get_depth_buffer().save("images/screenshot_depth.png")
+    # https://stackoverflow.com/questions/896548/how-to-convert-a-pyglet-image-to-a-pil-image
+    # pitch = -(pyglet_image.width * len('RGB'))
+    # data = pyglet_image.get_data('RGB', pitch) # using the new pitch
+    # im = Image.fromstring('RGB', (pyglet_image.width, pyglet_image.height), data)
+    # im.show()
+    im = Image.open("./images/screenshot.png").convert("RGB")
+    
+    # MANUALLY SWAP R AND B CHANNELS
+    # r, g, b = im.split()
+    # im = Image.merge("RGB", (b, g, r)) # This converts RGB to BGR layout
+    
+    controlnet_result = pipe(
+        prompt="stylish person",
+        image=im,
+        num_inference_steps=20,
+        negative_prompt="nsfw detailed").images[0]
+    Image._show(controlnet_result)
+    controlnet_result.save("./images/result.png")
+
+
+
+
 @window.event
 def on_draw():
     window.clear()
@@ -130,9 +177,16 @@ def on_key_press(symbol, modifiers):
     if symbol == pyglet.window.key.LEFT:
         shape_index -= 1
         
-    shape_index = np.clip(shape_index, 1, 44)
-    reload_shape(shape_index)
     
+    if symbol in (pyglet.window.key.LEFT, pyglet.window.key.RIGHT):
+        shape_index = np.clip(shape_index, 1, 44)
+        reload_shape(shape_index)
+        
+    if symbol == pyglet.window.key.SPACE:
+        controlnet_inference()
+
+
+
 shape_index = 1
 reload_shape(shape_index)
 compute_mvp()

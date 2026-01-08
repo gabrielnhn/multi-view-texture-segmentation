@@ -43,6 +43,7 @@ image = (image * 127.5 + 127.5).clip(0, 255).astype(np.uint8)
 image = Image.fromarray(image)
 
 Image._show(image)
+image.save("./images/normals_bunny.png")
 
 
 controlnet = ControlNetModel.from_pretrained(
