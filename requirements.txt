@@ -5,3 +5,7 @@ diffusers
 transformers
 accelerate
 # python-opencv
+conda install opencv
+
+pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu129
+

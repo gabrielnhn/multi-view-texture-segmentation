@@ -3,12 +3,12 @@ import numpy as np
 class OffModel:
     # https:#en.wikipedia.org/wiki/OFF_(file_format)
 
-    default_feature = np.array((0.2,0.2,0.2))
+    # default_feature = np.array((0.2,0.2,0.2))
     def __init__(self, path):
 
         # Data member
         self.vertices = []
-        self.features = []
+        # self.features = []
         self.hits = []
         self.faces = []
         # line
@@ -42,7 +42,7 @@ class OffModel:
                 self.vertices.append((x,y,z))
                 
                 # important for later
-                self.features.append(self.default_feature)
+                # self.features.append(self.default_feature)
                 self.hits.append(0)
             
             # all faces

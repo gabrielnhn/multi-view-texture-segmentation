@@ -5,10 +5,16 @@ layout (triangle_strip, max_vertices = 3) out;
 in vec3 vPos[];
 out vec3 fNormal;
 
+in vec3 geomColor[];
+out vec3 fColor;
+
 // uniform vec3 cameraPos;
 
 
 void main() {
+    fColor = geomColor[0];
+
+
     vec3 edge1 = vPos[1] - vPos[0];
     vec3 edge2 = vPos[2] - vPos[0];
     // vec3 normal = normalize(cross(edge1, edge2));
