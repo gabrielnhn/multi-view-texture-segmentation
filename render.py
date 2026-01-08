@@ -1,10 +1,12 @@
 import pyglet
 import numpy as np
+import ctypes
 from pyglet.graphics.shader import Shader, ShaderProgram
 from pyglet.math import Mat4, Vec3
 from load_off import OffModel
 from pyglet.window import mouse
 from pyglet.window import key
+from pyglet import gl
 
 # SAM2 setup
 from transformers import pipeline
@@ -47,7 +49,7 @@ geom_shader = Shader(geometry_src, 'geometry')
 frag_shader = Shader(frag_src, 'fragment')
 program = ShaderProgram(vert_shader, geom_shader, frag_shader)
 
-pyglet.gl.glEnable(pyglet.gl.GL_DEPTH_TEST);
+gl.glEnable(gl.GL_DEPTH_TEST);
 batch = pyglet.graphics.Batch()
 
 
@@ -65,7 +67,7 @@ def reload_shape(shape_index):
     
     vertex_list = program.vertex_list_indexed(
         len(shape.vertices), 
-        pyglet.gl.GL_TRIANGLES,
+        gl.GL_TRIANGLES,
         indices=np.array(shape.faces).flatten(),
         batch=batch,
         vertexPosition=('f', verts_np.flatten()),
@@ -108,17 +110,52 @@ def random_color():
     return torch.rand((3), device="cuda")
 
 
+
+def get_torch_depth(w, h):
+    # 1. Allocate a buffer for the raw pixels (unsigned int is safest)
+    # Using uint32 to capture 24-bit or 32-bit depth buffers
+    depth_data = (ctypes.c_uint32 * (w * h))()
+    
+    # 2. Directly read from the hardware buffer
+    # This bypasses Pyglet's internal format iterator that caused the crash
+    gl.glReadPixels(0, 0, w, h, gl.GL_DEPTH_COMPONENT, gl.GL_UNSIGNED_INT, depth_data)
+    
+    # 3. Wrap in a Torch tensor
+    # We use frombuffer to avoid extra copies
+    depth_array = np.frombuffer(depth_data, dtype=np.uint32).reshape(h, w)
+    depth_tensor = torch.from_numpy(depth_array.astype(np.float32)).to("cuda")
+    
+    # 4. Normalize and Flip
+    # 0xFFFFFFFF is the max value for a 32-bit depth capture
+    depth_tensor /= float(0xFFFFFFFF)
+    return depth_tensor.flip(0) # Flip to match Top-Down SAM2 coordinates
+
 def project_to_shape(feature_tensor):
     global shape, vertex_list
     w, h = window.width, window.height
     
     # 1. Get Depth and Matrices (Corrected)
-    depth_image = pyglet.image.get_buffer_manager().get_depth_buffer().get_image_data()
-    depth_array = np.frombuffer(depth_image.get_data('f', w * 4), dtype=np.float32)
-    depth_buffer = torch.from_numpy(depth_array).reshape(h, w).flip(0).to("cuda")
+    # depth_image = pyglet.image.get_buffer_manager().get_depth_buffer().get_image_data()
+    # depth_array = np.frombuffer(depth_image.get_data('f', w * 4), dtype=np.float32)
+    # depth_buffer = torch.from_numpy(depth_array).reshape(h, w).flip(0).to("cuda")
+    depth_buffer = get_torch_depth(w,h)
 
-    proj = torch.tensor(program['p'], device="cuda").reshape(4, 4).t()
-    mv = torch.tensor(program['mv'], device="cuda").reshape(4, 4).t()
+
+    # DEBUG
+    print(f"Depth Buffer Min: {depth_buffer.min().item():.4f}, Max: {depth_buffer.max().item():.4f}")
+    
+    
+
+
+    # proj = torch.tensor(program['p'], device="cuda").reshape(4, 4).t()
+    # mv = torch.tensor(program['mv'], device="cuda").reshape(4, 4).t()
+    # mvp = proj @ mv
+    # In project_to_shape:
+    p_data = (ctypes.c_float * 16)(*program['p']) # Ensure raw data access
+    mv_data = (ctypes.c_float * 16)(*program['mv'])
+
+    proj = torch.tensor(p_data, device="cuda").reshape(4, 4).t()
+    mv = torch.tensor(mv_data, device="cuda").reshape(4, 4).t()
     mvp = proj @ mv
 
     # 2. Project Vertices
@@ -163,9 +200,10 @@ def project_to_shape(feature_tensor):
         shape.features[visible_indices] = (1 - weight) * shape.features[visible_indices] + weight * feat_colors
 
         # Update VBO
-        colors = shape.features.cpu().numpy().astype(np.float32).flatten()
+        # colors = shape.features.cpu().numpy().astype(np.float32).flatten()
+        colors = shape.features.cpu().numpy().flatten()
         vertex_list.vertexColor = colors
-        program["useNormals"] = False
+    program["useNormals"] = False
         
         
         
@@ -216,7 +254,7 @@ def sam2_inference():
 @window.event
 def on_draw():
     window.clear()
-    pyglet.gl.glClearColor(0.5, 0.5, 1.0, 1.0)
+    gl.glClearColor(0.5, 0.5, 1.0, 1.0)
     batch.draw()
 
 @window.event
