@@ -110,111 +110,87 @@ def random_color():
     return torch.rand((3), device="cuda")
 
 
-
 def get_torch_depth(w, h):
-    # 1. Allocate a buffer for the raw pixels (unsigned int is safest)
-    # Using uint32 to capture 24-bit or 32-bit depth buffers
     depth_data = (ctypes.c_uint32 * (w * h))()
     
-    # 2. Directly read from the hardware buffer
-    # This bypasses Pyglet's internal format iterator that caused the crash
     gl.glReadPixels(0, 0, w, h, gl.GL_DEPTH_COMPONENT, gl.GL_UNSIGNED_INT, depth_data)
     
-    # 3. Wrap in a Torch tensor
-    # We use frombuffer to avoid extra copies
     depth_array = np.frombuffer(depth_data, dtype=np.uint32).reshape(h, w)
     depth_tensor = torch.from_numpy(depth_array.astype(np.float32)).to("cuda")
     
-    # 4. Normalize and Flip
     # 0xFFFFFFFF is the max value for a 32-bit depth capture
     depth_tensor /= float(0xFFFFFFFF)
     return depth_tensor.flip(0) # Flip to match Top-Down SAM2 coordinates
 
-def project_to_shape(feature_tensor):
+def project_to_shape(masks_list, index):
     global shape, vertex_list
+    if masks_list is None or index >= len(masks_list):
+        return
+
+    # 1. Move mask to CUDA immediately to match ix and iy
+    current_mask_data = masks_list[index]
+
+    # Check if it's already a tensor, otherwise convert
+    if not isinstance(current_mask_data, torch.Tensor):
+        mask_tensor = torch.from_numpy(current_mask_data).to("cuda")
+    else:
+        mask_tensor = current_mask_data.to("cuda")
+
+    if mask_tensor.ndim == 3:
+        mask_tensor = mask_tensor.squeeze(0)
+
     w, h = window.width, window.height
-    
-    # 1. Get Depth and Matrices (Corrected)
-    # depth_image = pyglet.image.get_buffer_manager().get_depth_buffer().get_image_data()
-    # depth_array = np.frombuffer(depth_image.get_data('f', w * 4), dtype=np.float32)
-    # depth_buffer = torch.from_numpy(depth_array).reshape(h, w).flip(0).to("cuda")
-    depth_buffer = get_torch_depth(w,h)
+    depth_buffer = get_torch_depth(w, h)
 
-
-    # DEBUG
-    print(f"Depth Buffer Min: {depth_buffer.min().item():.4f}, Max: {depth_buffer.max().item():.4f}")
-    
-    
-
-
-    # proj = torch.tensor(program['p'], device="cuda").reshape(4, 4).t()
-    # mv = torch.tensor(program['mv'], device="cuda").reshape(4, 4).t()
-    # mvp = proj @ mv
-    # In project_to_shape:
-    p_data = (ctypes.c_float * 16)(*program['p']) # Ensure raw data access
+    p_data = (ctypes.c_float * 16)(*program['p'])
     mv_data = (ctypes.c_float * 16)(*program['mv'])
-
     proj = torch.tensor(p_data, device="cuda").reshape(4, 4).t()
     mv = torch.tensor(mv_data, device="cuda").reshape(4, 4).t()
     mvp = proj @ mv
 
-    # 2. Project Vertices
     verts = torch.from_numpy(np.array(shape.vertices, dtype=np.float32)).to("cuda")
     verts_h = torch.cat([verts, torch.ones((verts.shape[0], 1), device="cuda")], dim=1)
     
     clip_space = verts_h @ mvp.t()
     ndc = clip_space[:, :3] / clip_space[:, 3:4]
     
-    # Screen coordinates: X is [0, W], Y is [0, H]
-    # Note: SAM2 image is top-down, so Y = (1 - ndc_y)
     screen_x = (ndc[:, 0] + 1) * (w / 2)
     screen_y = (1 - ndc[:, 1]) * (h / 2)
-    proj_z = (ndc[:, 2] + 1) / 2.0  # Normalized depth
+    proj_z = (ndc[:, 2] + 1) / 2.0 
 
-    # 3. Viewport Clipping
     valid_mask = (screen_x >= 0) & (screen_x < w) & (screen_y >= 0) & (screen_y < h)
     
-    # 4. Depth Testing
     ix = screen_x[valid_mask].long()
     iy = screen_y[valid_mask].long()
     sampled_depth = depth_buffer[iy, ix]
     
-    # Bias (diag * epsilon) to prevent z-fighting
     epsilon = 0.005 
-    hit_mask = proj_z[valid_mask] <= (sampled_depth + epsilon)
-    
-    # Final active indices
+    hit_mask =( proj_z[valid_mask] <= (sampled_depth + epsilon)).to("cuda")
     visible_indices = torch.where(valid_mask)[0][hit_mask]
-    
-    print(f"Total Verts: {len(verts)} | Hits: {len(visible_indices)}")
 
     if len(visible_indices) > 0:
         if not hasattr(shape, 'features'):
             shape.features = torch.zeros((len(verts), 3), device="cuda")
             shape.hits = torch.zeros((len(verts), 1), device="cuda")
 
-        # Update features
-        feat_colors = feature_tensor[iy[hit_mask], ix[hit_mask]].to("cuda")
-        shape.hits[visible_indices] += 1
-        weight = 1.0 / shape.hits[visible_indices]
-        shape.features[visible_indices] = (1 - weight) * shape.features[visible_indices] + weight * feat_colors
+        mask_values = mask_tensor[iy[hit_mask], ix[hit_mask]] # Shape: (N,)
+        
+        # Create a unique color based on the mask index
+        torch.manual_seed(index) # Keep the color consistent for this mask index
+        mask_color = torch.rand(3, device="cuda") 
+
+        # Only update vertices where the mask is actually present
+        actual_hits = mask_values > 0.5
+        target_indices = visible_indices[actual_hits]
+
+        if len(target_indices) > 0:
+            shape.features[target_indices] = mask_color
 
         # Update VBO
-        # colors = shape.features.cpu().numpy().astype(np.float32).flatten()
         colors = shape.features.cpu().numpy().flatten()
         vertex_list.vertexColor = colors
+    
     program["useNormals"] = False
-        
-        
-        
-# def update_model_vbo():
-#     # Push the features back to the vertex_list for rendering
-#     # We map features to colors (requires 'vertexColor' in your shader)
-#     colors = shape.features.cpu().numpy().flatten().astype('f')
-#     vertex_list.vertexColor = colors
-    
-    
-
 
 
 def controlnet_inference():
@@ -245,10 +221,16 @@ def sam2_inference():
     outputs = sam2_mask_generator(controlnet_result, points_per_batch=64)
     w, h = controlnet_result.size
     classes_vis = torch.zeros((h, w, 3), dtype=torch.float32, device="cuda")
-    for mask in outputs["masks"]:
-        classes_vis[mask] = random_color()
-        
-    project_to_shape(classes_vis)
+    
+    global masks
+    global mask_index
+    masks = outputs["masks"]
+    mask_index = 0
+    
+    # for mask in masks:
+    #     classes_vis[mask] = random_color()
+    
+    project_to_shape(masks, mask_index)
 
 
 @window.event
@@ -321,11 +303,27 @@ def on_key_press(symbol, modifiers):
     elif symbol == key.DOWN:
         program["useNormals"] = False
         
+    global mask_index
+    global masks
+    # Iterate through masks
+    if masks is not None:
+        if symbol == key.D:
+            mask_index = (mask_index + 1) % len(masks)
+            print(f"Projecting Mask {mask_index}/{len(masks)}")
+            project_to_shape(masks, mask_index)
+            
+        if symbol == key.A:
+            mask_index = (mask_index - 1) % len(masks)
+            print(f"Projecting Mask {mask_index}/{len(masks)}")
+            project_to_shape(masks, mask_index)
+        
 
 
 program["useNormals"] = True
 controlnet_result = None
+masks = None
 shape_index = 1
+mask_index = 0
 reload_shape(shape_index)
 compute_mvp()
 pyglet.app.run()
